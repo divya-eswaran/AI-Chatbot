@@ -1,0 +1,112 @@
+body {
+    margin: 0;
+    font-family: 'Segoe UI', sans-serif;
+    background: #f4f6f9;
+}
+
+/* Layout */
+.container {
+    display: flex;
+    height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+    width: 250px;
+    background: #1e1e2f;
+    color: white;
+    padding: 20px;
+}
+
+.sidebar h2 {
+    margin-bottom: 20px;
+}
+
+.sidebar button {
+    width: 100%;
+    padding: 10px;
+    border: none;
+    background: #4CAF50;
+    color: white;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+.sidebar .info {
+    margin-top: 20px;
+    font-size: 14px;
+    opacity: 0.7;
+}
+
+/* Chat Area */
+.chat-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Chat Box */
+.chat-box {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+     display: flex;              /* ✅ IMPORTANT */
+    flex-direction: column;
+}
+
+/* Messages */
+.message {
+    margin: 10px 0;
+    max-width: 60%;
+    padding: 10px 15px;
+    border-radius: 15px;
+    line-height: 1.4;
+}
+
+.user {
+    background: #4CAF50;
+    color: white;
+    margin-left: auto;
+    text-align: right;
+}
+
+.bot {
+    background: #e0e0e0;
+    color: black;
+    margin-right: auto;
+}
+
+/* Input */
+.input-area {
+    display: flex;
+    padding: 10px;
+    background: white;
+    border-top: 1px solid #ccc;
+}
+
+.input-area input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    outline: none;
+}
+
+.input-area button {
+    margin-left: 10px;
+    padding: 10px 15px;
+    border: none;
+    background: #1e88e5;
+    color: white;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+/* Scrollbar */
+.chat-box::-webkit-scrollbar {
+    width: 6px;
+}
+.chat-box::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 10px;
+}

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Chatbot</title>
+
+    <!-- ✅ Proper static linking -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</head>
+<body>
+
+<div class="container">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h2>🤖 AI Bot</h2>
+        <button onclick="clearChat()">New Chat</button>
+        <p class="info">Ask anything...</p>
+    </div>
+
+    <!-- Chat Area -->
+    <div class="chat-area">
+
+        <div id="chat-box" class="chat-box"></div>
+
+        <div class="input-area">
+            <input 
+                type="text" 
+                id="user-input" 
+                placeholder="Type your message..." 
+                onkeypress="handleKey(event)"
+            >
+            <button onclick="sendMessage()">Send</button>
+        </div>
+
+    </div>
+
+</div>
+
+<!-- ✅ Proper JS linking -->
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+</body>
+</html>
