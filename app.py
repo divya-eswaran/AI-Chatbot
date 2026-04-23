@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect
 import re
 import torch
 import sqlite3
+import os
 from datetime import datetime
 
 from pymongo import MongoClient
@@ -9,22 +10,27 @@ from sentence_transformers import SentenceTransformer, util
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 app = Flask(__name__)
-app.secret_key = "secret123"   # 🔐 required for login session
+app.secret_key = "secret123"
 
 # ------------------ MONGODB CONNECTION ------------------
-client = MongoClient("mongodb://localhost:27017/")
-db = client["chatbot_db"]
+MONGO_URI = os.environ.get("MONGO_URI")
 
-faq_collection = db["faqs"]
-chat_collection = db["chats"]
-
-faqs = list(faq_collection.find({}, {"_id": 0}))
+if MONGO_URI:
+    client = MongoClient(MONGO_URI)
+    db = client["chatbot_db"]
+    faq_collection = db["faqs"]
+    chat_collection = db["chats"]
+    faqs = list(faq_collection.find({}, {"_id": 0}))
+else:
+    print("⚠️ No MongoDB connected. Using empty FAQ.")
+    faqs = []
+    chat_collection = None
 
 # ------------------ AI MODELS ------------------
 st_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-questions = [faq["question"] for faq in faqs]
-question_embeddings = st_model.encode(questions, convert_to_tensor=True)
+questions = [faq["question"] for faq in faqs] if faqs else []
+question_embeddings = st_model.encode(questions, convert_to_tensor=True) if questions else None
 
 model_name = "google/flan-t5-base"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -86,15 +92,16 @@ def get_response(user_msg):
     if rule_ans:
         return rule_ans
 
-    # FAQ
-    query_embedding = st_model.encode(user_msg, convert_to_tensor=True)
-    scores = util.cos_sim(query_embedding, question_embeddings)
+    # FAQ (only if available)
+    if question_embeddings is not None:
+        query_embedding = st_model.encode(user_msg, convert_to_tensor=True)
+        scores = util.cos_sim(query_embedding, question_embeddings)
 
-    best_score = scores.max().item()
-    best_idx = scores.argmax().item()
+        best_score = scores.max().item()
+        best_idx = scores.argmax().item()
 
-    if best_score >= 0.70:
-        return faqs[best_idx]["answer"]
+        if best_score >= 0.70:
+            return faqs[best_idx]["answer"]
 
     return ai_response(user_msg)
 
@@ -166,17 +173,17 @@ def chat():
     user_msg = request.json.get("message")
     response = get_response(user_msg)
 
-    # ✅ SAVE CHAT WITH USER
-    chat_collection.insert_one({
-        "username": session["user"],
-        "user": user_msg,
-        "bot": response,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    })
+    # Save chat only if MongoDB exists
+    if chat_collection:
+        chat_collection.insert_one({
+            "username": session["user"],
+            "user": user_msg,
+            "bot": response,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
 
     return jsonify({"response": response})
 
-
 # ------------------ RUN ------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
