@@ -2,7 +2,6 @@ from flask import Flask, render_template, request, jsonify, session, redirect
 import re
 import torch
 import sqlite3
-import os
 from datetime import datetime
 
 from pymongo import MongoClient
@@ -12,45 +11,65 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 app = Flask(__name__)
 app.secret_key = "secret123"
 
-# ------------------ MONGODB CONNECTION ------------------
-MONGO_URI = os.environ.get("MONGO_URI")
+# ------------------ SQLITE ------------------
+def init_db():
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-if MONGO_URI:
-    client = MongoClient(MONGO_URI)
+init_db()
+
+# ------------------ MONGODB (LOCAL ONLY) ------------------
+try:
+    client = MongoClient("mongodb://127.0.0.1:27017")  # FORCE LOCAL
+
     db = client["chatbot_db"]
-    faq_collection = db["faqs"]
     chat_collection = db["chats"]
-    faqs = list(faq_collection.find({}, {"_id": 0}))
-else:
-    print("⚠️ No MongoDB connected. Using empty FAQ.")
-    faqs = []
-    chat_collection = None
+    faq_collection = db["faqs"]
 
-# ------------------ AI MODELS ------------------
+    faqs = list(faq_collection.find({}, {"_id": 0}))
+
+    print("✅ Connected to LOCAL MongoDB")
+    print("📂 DB:", db.name)
+
+except Exception as e:
+    print("❌ MongoDB Connection Error:", e)
+    chat_collection = None
+    faqs = []
+
+# ------------------ MODEL ------------------
+print("🔄 Loading models...")
 st_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 questions = [faq["question"] for faq in faqs] if faqs else []
 question_embeddings = st_model.encode(questions, convert_to_tensor=True) if questions else None
 
-model_name = "google/flan-t5-base"
+model_name = "google/flan-t5-small"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 llm_model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 llm_model = llm_model.to(device)
 
-# ------------------ CLEAN INPUT ------------------
+# ------------------ CLEAN TEXT ------------------
 def clean_text(text):
     text = text.lower()
     text = re.sub(r'[^\w\s]', '', text)
     return text.strip()
 
-# ------------------ RULE BASED ------------------
+# ------------------ RULE BASE ------------------
 def rule_based_response(user_msg):
     rules = {
-        "what is ai": "Artificial Intelligence (AI) enables machines to perform tasks that require human intelligence like learning and decision-making.",
-        "what is ml": "Machine Learning (ML) is a subset of AI that allows systems to learn from data.",
-        "programming languages": "Examples: Python, Java, C, C++, JavaScript.",
+        "what is ai": "Artificial Intelligence enables machines to think and learn.",
+        "what is c": "C is a procedural programming language.",
+        "what is http": "HTTP is used for web communication."
     }
 
     for key in rules:
@@ -61,12 +80,7 @@ def rule_based_response(user_msg):
 
 # ------------------ AI RESPONSE ------------------
 def ai_response(user_msg):
-    prompt = f"""
-Answer clearly in 2-3 lines. No repetition.
-
-Question: {user_msg}
-Answer:
-"""
+    prompt = f"Answer clearly in 2 lines:\nQuestion: {user_msg}\nAnswer:"
 
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
@@ -74,11 +88,12 @@ Answer:
         **inputs,
         max_new_tokens=60,
         num_beams=4,
-        repetition_penalty=1.2,
-        no_repeat_ngram_size=2
+        repetition_penalty=1.3
     )
 
-    return tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+    answer = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+
+    return answer if len(answer.split()) > 2 else "Try asking differently."
 
 # ------------------ MAIN LOGIC ------------------
 def get_response(user_msg):
@@ -87,12 +102,10 @@ def get_response(user_msg):
     if len(user_msg.split()) <= 1:
         return "Please ask a proper question"
 
-    # Rule-based
     rule_ans = rule_based_response(user_msg)
     if rule_ans:
         return rule_ans
 
-    # FAQ (only if available)
     if question_embeddings is not None:
         query_embedding = st_model.encode(user_msg, convert_to_tensor=True)
         scores = util.cos_sim(query_embedding, question_embeddings)
@@ -105,8 +118,7 @@ def get_response(user_msg):
 
     return ai_response(user_msg)
 
-# ------------------ AUTH (SQLITE) ------------------
-
+# ------------------ AUTH ------------------
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
@@ -117,10 +129,10 @@ def register():
         cursor = conn.cursor()
 
         try:
-            cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+            cursor.execute("INSERT INTO users VALUES (?, ?)", (username, password))
             conn.commit()
         except:
-            return "User already exists"
+            return render_template("register.html", error="User exists")
 
         conn.close()
         return redirect("/login")
@@ -146,7 +158,7 @@ def login():
             session["user"] = username
             return redirect("/")
         else:
-            return "Invalid credentials"
+            return render_template("login.html", error="Invalid credentials")
 
     return render_template("login.html")
 
@@ -156,34 +168,52 @@ def logout():
     session.pop("user", None)
     return redirect("/login")
 
-# ------------------ ROUTES ------------------
-
+# ------------------ HOME ------------------
 @app.route("/")
 def home():
     if "user" not in session:
         return redirect("/login")
-    return render_template("index.html", user=session["user"])
+    return render_template("index.html")
 
-
+# ------------------ CHAT ------------------
 @app.route("/chat", methods=["POST"])
 def chat():
+    print("\n🔥 /chat HIT")
+
     if "user" not in session:
         return jsonify({"response": "Please login first"})
 
-    user_msg = request.json.get("message")
+    data = request.get_json()
+    user_msg = data.get("message")
+
     response = get_response(user_msg)
 
-    # Save chat only if MongoDB exists
-    if chat_collection:
-        chat_collection.insert_one({
-            "username": session["user"],
-            "user": user_msg,
-            "bot": response,
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
+    print("USER:", user_msg)
+    print("BOT:", response)
+
+    # ------------------ SAVE TO MONGO ------------------
+    try:
+        if chat_collection is not None:
+            result = chat_collection.insert_one({
+                "username": session["user"],
+                "user": user_msg,
+                "bot": response,
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+            print("📥 INSERTED ID:", result.inserted_id)
+
+            total = chat_collection.count_documents({})
+            print("📊 TOTAL DOCS IN DB:", total)
+
+        else:
+            print("❌ chat_collection is None")
+
+    except Exception as e:
+        print("❌ INSERT ERROR:", e)
 
     return jsonify({"response": response})
 
 # ------------------ RUN ------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(host="0.0.0.0", port=10000)
